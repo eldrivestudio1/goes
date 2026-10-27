@@ -34,7 +34,18 @@ class MainActivity : Activity() {
         super.onCreate(savedInstanceState)
         window.statusBarColor = Color.rgb(16,16,16); window.navigationBarColor = Color.rgb(16,16,16)
         buildUi()
-        registerReceiver(tickReceiver, IntentFilter("id.gowes.offline.TICK"), RECEIVER_NOT_EXPORTED)
+        
+        // registerReceiver(tickReceiver, IntentFilter("id.gowes.offline.TICK"), RECEIVER_NOT_EXPORTED)
+    
+        val filter = IntentFilter("id.gowes.offline.TICK")
+        
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            registerReceiver(tickReceiver, filter, RECEIVER_NOT_EXPORTED)
+        } else {
+            @Suppress("DEPRECATION")
+            registerReceiver(tickReceiver, filter)
+        }
+
         refreshStats()
     }
     private fun buildUi() {
