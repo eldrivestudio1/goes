@@ -186,7 +186,7 @@ class MainActivity : Activity() {
         metrics?.findViewWithTag<TextView>("DURASI")?.text = String.format(Locale.US, "%02d:%02d:%02d", hours, minutes, seconds)
         metrics?.findViewWithTag<TextView>("RATA-RATA")?.text = String.format(Locale("id", "ID"), "%.1f km/j", speed)
         metrics?.findViewWithTag<TextView>("TANJAKAN")?.text = String.format(Locale("id", "ID"), "%.0f m", ascent)
-        routeView.setPoints(prefs.getString("active_points", "[]"))
+        routeView.setPoints(prefs.getString("active_points", "[]") ?: "[]")
         action.text = if (prefs.getBoolean("recording", false)) "Selesaikan Gowes" else "Mulai Gowes"
     }
 
