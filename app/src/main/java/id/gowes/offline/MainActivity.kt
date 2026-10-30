@@ -10,13 +10,8 @@ import android.content.pm.PackageManager
 import android.location.LocationManager
 import android.graphics.Canvas
 import android.graphics.Color
-import android.graphics.Bitmap
-import android.graphics.BitmapFactory
 import android.graphics.Paint
 import android.graphics.Path
-import android.graphics.Rect
-import android.graphics.LinearGradient
-import android.graphics.Shader
 import android.graphics.drawable.GradientDrawable
 import android.os.Build
 import android.os.Bundle
@@ -39,12 +34,10 @@ import java.util.Locale
 
 class MainActivity : Activity() {
     private lateinit var root: LinearLayout
-    private lateinit var shell: LinearLayout
     private lateinit var stats: TextView
     private lateinit var routeView: RouteView
     private lateinit var action: Button
     private val prefs by lazy { getSharedPreferences("rides", MODE_PRIVATE) }
-    private var page = 0
     private val handler = Handler(Looper.getMainLooper())
     private val tickReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) = refreshStats()
@@ -58,9 +51,9 @@ class MainActivity : Activity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        window.statusBarColor = 0xFF0A1117.toInt()
-        window.navigationBarColor = 0xFF0A1117.toInt()
-        if (Build.VERSION.SDK_INT >= 23) window.decorView.systemUiVisibility = 0
+        window.statusBarColor = Color.rgb(10, 15, 17)
+        window.navigationBarColor = Color.rgb(10, 15, 17)
+        if (Build.VERSION.SDK_INT >= 23) window.decorView.systemUiVisibility = View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR.inv()
         buildUi()
         val filter = IntentFilter(TrackingService.ACTION_TICK)
         if (Build.VERSION.SDK_INT >= 33) registerReceiver(tickReceiver, filter, RECEIVER_NOT_EXPORTED) else {
@@ -71,78 +64,54 @@ class MainActivity : Activity() {
     }
 
     private fun buildUi() {
-        shell = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; background = GradientDrawable(GradientDrawable.Orientation.TL_BR, intArrayOf(BACKDROP, 0xFF111D25.toInt(), BACKDROP)) }
-        val scroll = ScrollView(this).apply { isFillViewport = true; overScrollMode = View.OVER_SCROLL_NEVER }
+        val scroll = ScrollView(this)
         root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(dp(20), dp(18), dp(20), dp(26))
-            setBackgroundColor(Color.TRANSPARENT)
+            setPadding(dp(20), dp(24), dp(20), dp(32))
+            setBackgroundColor(Color.rgb(10, 15, 17))
         }
         scroll.addView(root)
-        shell.addView(scroll, LinearLayout.LayoutParams(-1, 0, 1f))
-        shell.addView(bottomNavigation(), LinearLayout.LayoutParams(-1, dp(66)))
-        setContentView(shell)
-        when (page) { 0 -> showHome(); 1 -> showHistory(); 2 -> showAnalytics(); else -> showSettings() }
-    }
+        setContentView(scroll)
 
-    private fun sectionTitle(title: String, subtitle: String? = null) {
-        root.addView(text(title, 28, INK, true))
-        if (subtitle != null) root.addView(text(subtitle, 13, MUTED, false).apply { setPadding(0, dp(4), 0, dp(14)) })
-    }
+        root.addView(text("gowes", 32, Color.WHITE, true))
+        root.addView(text("RIDE TRACKER  ·  OFFLINE GPS", 11, GREEN, true).apply { setPadding(0, dp(3), 0, dp(22)) })
 
-    private fun bottomNavigation(): LinearLayout = LinearLayout(this).apply {
-        background = GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM, intArrayOf(0xF21B2932.toInt(), 0xF20D171E.toInt())).apply { cornerRadii = floatArrayOf(dp(22).toFloat(), dp(22).toFloat(), dp(22).toFloat(), dp(22).toFloat(), 0f, 0f, 0f, 0f); setStroke(dp(1), 0x24FFFFFF) }
-        gravity = Gravity.CENTER
-        val labels = listOf("Beranda", "Riwayat", "Analitik", "Pengaturan")
-        val icons = listOf("⌂", "◷", "▥", "⚙")
-        labels.forEachIndexed { index, label ->
-            val selected = page == index
-            val item = LinearLayout(this@MainActivity).apply { orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER; background = if (selected) rounded(0x2636D9C4, 16) else null; setOnClickListener { page = index; buildUi() } }
-            item.addView(text(icons[index], 20, if (selected) ACCENT else MUTED, true).apply { gravity = Gravity.CENTER })
-            item.addView(text(label, 10, if (selected) ACCENT_DARK else MUTED, selected).apply { gravity = Gravity.CENTER; setPadding(0, dp(2), 0, 0) })
-            addView(item, LinearLayout.LayoutParams(0, -1, 1f))
-        }
-    }
-
-    private fun showHome() {
-        sectionTitle("Selamat gowes", "RIDE TRACKER  ·  SIAP MENEMANI")
-        root.addView(text("ROAD BIKE  /  DAILY RIDE", 10, MUTED, true).apply { setPadding(0, dp(4), 0, dp(7)) })
-        root.addView(BikeView(this), LinearLayout.LayoutParams(-1, dp(230)))
-        val current = prefs.getBoolean("recording", false)
-        val card = column(Color.WHITE, 17).apply { background = rounded(Color.WHITE, 22) }
-        card.addView(text(if (current) "PERJALANAN BERLANGSUNG" else "SIAP UNTUK BERANGKAT", 10, MUTED, true))
-        stats = text("0,00", 38, INK, true).apply { setPadding(0, dp(6), 0, 0) }
-        card.addView(LinearLayout(this).apply { gravity = Gravity.BOTTOM; addView(stats); addView(text(" km", 16, MUTED, false).apply { setPadding(0, 0, 0, dp(7)) }) })
-        val metrics = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; setPadding(0, dp(12), 0, 0); tag = "metrics" }
+        val card = column(Color.rgb(22, 30, 31), 20).apply { background = rounded(Color.rgb(22, 30, 31), 22) }
+        card.addView(text("PERJALANAN SAAT INI", 11, MUTED, true))
+        stats = text("0,00 km", 38, Color.WHITE, true).apply { setPadding(0, dp(12), 0, dp(1)) }
+        card.addView(stats)
+        card.addView(text("Jarak tempuh", 12, MUTED, false))
+        val metrics = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; setPadding(0, dp(20), 0, dp(4)) }
         metrics.addView(metric("DURASI", "00:00:00"), LinearLayout.LayoutParams(0, -2, 1f))
         metrics.addView(metric("RATA-RATA", "0,0 km/j"), LinearLayout.LayoutParams(0, -2, 1f))
         metrics.addView(metric("TANJAKAN", "0 m"), LinearLayout.LayoutParams(0, -2, 1f))
-        card.addView(metrics); root.addView(card)
-        root.addView(text("JEJAK GPS", 11, MUTED, true).apply { setPadding(0, dp(20), 0, dp(9)) })
-        routeView = RouteView(this, animate = true).apply { background = rounded(Color.WHITE, 20) }
-        root.addView(routeView, LinearLayout.LayoutParams(-1, dp(150)))
+        metrics.tag = "metrics"
+        card.addView(metrics)
+        root.addView(card)
+
+        root.addView(text("JEJAK PERJALANAN", 12, MUTED, true).apply { setPadding(0, dp(25), 0, dp(10)) })
+        routeView = RouteView(this, animate = true).apply { background = rounded(Color.rgb(17, 24, 26), 20) }
+        root.addView(routeView, LinearLayout.LayoutParams(-1, dp(190)))
         action = Button(this).apply {
-            textSize = 15f; setTextColor(BACKDROP); isAllCaps = false; typeface = android.graphics.Typeface.DEFAULT_BOLD
-            background = rounded(ACCENT, 17); setOnClickListener { toggleRecording() }
+            textSize = 16f
+            setTextColor(Color.rgb(12, 15, 17))
+            isAllCaps = false
+            typeface = android.graphics.Typeface.DEFAULT_BOLD
+            background = rounded(GREEN, 18)
+            setOnClickListener { toggleRecording() }
         }
-        root.addView(action, LinearLayout.LayoutParams(-1, dp(52)).apply { topMargin = dp(14) })
-        root.addView(text("Gowes terakhir", 19, INK, true).apply { setPadding(0, dp(24), 0, dp(8)) })
-        val history = try { JSONArray(prefs.getString("history", "[]")) } catch (_: Exception) { JSONArray() }
-        if (history.length() == 0) root.addView(text("Perjalanan tersimpan akan muncul di sini.", 13, MUTED, false))
-        else {
-            val ride = history.optJSONObject(history.length() - 1)!!
-            val km = ride.optDouble("distance") / 1000
-            val date = SimpleDateFormat("dd MMM · HH:mm", Locale("id", "ID")).format(Date(ride.optLong("date")))
-            val last = column(Color.WHITE, 14).apply { background = rounded(Color.WHITE, 18); setOnClickListener { showRideDetail(ride, date) } }
-            last.addView(text(date, 11, MUTED, false))
-            last.addView(text(String.format(Locale("id", "ID"), "%.2f km    ·    %d menit", km, ride.optLong("elapsed") / 60000), 15, INK, true).apply { setPadding(0, dp(5), 0, 0) })
-            root.addView(last)
-        }
+        root.addView(action, LinearLayout.LayoutParams(-1, dp(54)).apply { topMargin = dp(20) })
+
+        root.addView(text("Riwayat gowes", 21, Color.WHITE, true).apply { setPadding(0, dp(30), 0, dp(4)) })
+        root.addView(text("Tersimpan aman di perangkat ini.", 12, MUTED, false).apply { setPadding(0, 0, 0, dp(10)) })
+        val chartButton = Button(this).apply { text = "Lihat grafik rekap"; isAllCaps = false; background = rounded(Color.rgb(35, 45, 47), 16); setTextColor(Color.WHITE); setOnClickListener { showSummaryChart() } }
+        root.addView(chartButton, LinearLayout.LayoutParams(-1, dp(48)))
+        showHistory()
     }
 
     private fun metric(label: String, value: String): LinearLayout = column(Color.TRANSPARENT, 0).apply {
-        addView(text(label, 9, MUTED, true))
-        addView(text(value, 13, INK, true).apply { tag = label })
+        addView(text(label, 10, MUTED, true))
+        addView(text(value, 15, Color.WHITE, true).apply { tag = label })
     }
 
     private fun column(color: Int, padding: Int): LinearLayout = LinearLayout(this).apply {
@@ -152,11 +121,7 @@ class MainActivity : Activity() {
     }
 
     private fun rounded(color: Int, radius: Int) = GradientDrawable().apply {
-        if (color == Color.WHITE) {
-            orientation = GradientDrawable.Orientation.TOP_BOTTOM
-            colors = intArrayOf(0x24FFFFFF, 0x12FFFFFF)
-            setStroke(dp(1), 0x2EFFFFFF)
-        } else setColor(color)
+        setColor(color)
         cornerRadius = dp(radius).toFloat()
     }
 
@@ -173,9 +138,8 @@ class MainActivity : Activity() {
     private fun toggleRecording() {
         if (prefs.getBoolean("recording", false)) {
             startService(Intent(this, TrackingService::class.java).setAction(TrackingService.ACTION_STOP))
-            page = 1
-            buildUi()
             refreshStats()
+            showHistory()
             return
         }
         if (!hasLocation()) {
@@ -228,7 +192,7 @@ class MainActivity : Activity() {
         val minutes = elapsed / 60000 % 60
         val seconds = elapsed / 1000 % 60
         val speed = if (elapsed > 0) distance / (elapsed / 3600000.0) / 1000 else 0.0
-        stats.text = String.format(Locale("id", "ID"), "%.2f", distance / 1000)
+        stats.text = String.format(Locale("id", "ID"), "%.2f km", distance / 1000)
         val metrics = root.findViewWithTag<LinearLayout>("metrics")
         metrics?.findViewWithTag<TextView>("DURASI")?.text = String.format(Locale.US, "%02d:%02d:%02d", hours, minutes, seconds)
         metrics?.findViewWithTag<TextView>("RATA-RATA")?.text = String.format(Locale("id", "ID"), "%.1f km/j", speed)
@@ -239,7 +203,6 @@ class MainActivity : Activity() {
 
     private fun showHistory() {
         if (!::root.isInitialized) return
-        sectionTitle("Riwayat", "Semua perjalanan tersimpan di perangkat")
         val existing = root.findViewWithTag<View>("history-list")
         if (existing != null) root.removeView(existing)
         val list = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; tag = "history-list" }
@@ -252,9 +215,9 @@ class MainActivity : Activity() {
             val date = SimpleDateFormat("dd MMM yyyy  •  HH:mm", Locale("id", "ID")).format(Date(ride.optLong("date")))
             val km = ride.optDouble("distance") / 1000.0
             val elapsedMin = ride.optLong("elapsed") / 60000
-            val item = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(15), dp(13), dp(15), dp(13)); background = rounded(Color.WHITE, 18) }
+            val item = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(15), dp(13), dp(15), dp(13)); background = rounded(Color.rgb(22, 30, 31), 18) }
             item.addView(text(date, 12, MUTED, false))
-            item.addView(text(String.format(Locale("id", "ID"), "%.2f km     %d menit     %.0f m tanjakan", km, elapsedMin, ride.optDouble("ascent")), 14, INK, true).apply { setPadding(0, dp(5), 0, 0) })
+            item.addView(text(String.format(Locale("id", "ID"), "%.2f km     %d menit     %.0f m tanjakan", km, elapsedMin, ride.optDouble("ascent")), 14, Color.WHITE, true).apply { setPadding(0, dp(5), 0, 0) })
             val preview = RouteView(this)
             preview.setPoints(ride.optJSONArray("points")?.toString() ?: "[]")
             item.addView(preview, LinearLayout.LayoutParams(-1, dp(105)).apply { topMargin = dp(10) })
@@ -264,39 +227,6 @@ class MainActivity : Activity() {
         root.addView(list)
     }
 
-    private fun showAnalytics() {
-        sectionTitle("Analitik", "Ringkasan aktivitas bersepeda")
-        val history = try { JSONArray(prefs.getString("history", "[]")) } catch (_: Exception) { JSONArray() }
-        val km = (0 until history.length()).sumOf { history.optJSONObject(it)?.optDouble("distance") ?: 0.0 } / 1000
-        val ascent = (0 until history.length()).sumOf { history.optJSONObject(it)?.optDouble("ascent") ?: 0.0 }
-        val elapsed = (0 until history.length()).sumOf { history.optJSONObject(it)?.optLong("elapsed") ?: 0L }
-        val summary = column(Color.WHITE, 16).apply { background = rounded(Color.WHITE, 20) }
-        summary.addView(text("TOTAL JARAK", 10, MUTED, true))
-        summary.addView(text(String.format(Locale("id", "ID"), "%.1f km", km), 32, INK, true).apply { setPadding(0, dp(5), 0, dp(12)) })
-        summary.addView(text("${history.length()} perjalanan   ·   ${ascent.toInt()} m tanjakan   ·   ${elapsed / 3600000} jam ${elapsed / 60000 % 60} mnt", 12, MUTED, false))
-        root.addView(summary)
-        root.addView(text("JARAK PER PERJALANAN", 11, MUTED, true).apply { setPadding(0, dp(22), 0, dp(9)) })
-        val chart = column(Color.WHITE, 13).apply { background = rounded(Color.WHITE, 20) }
-        chart.addView(SummaryChartView(this, history), LinearLayout.LayoutParams(-1, dp(190)))
-        root.addView(chart)
-        root.addView(text("Grafik menampilkan hingga 12 perjalanan terakhir. Data dihitung dari rekaman GPS yang tersimpan lokal.", 12, MUTED, false).apply { setPadding(0, dp(10), 0, 0) })
-    }
-
-    private fun showSettings() {
-        sectionTitle("Pengaturan", "Preferensi dan informasi aplikasi")
-        val box = column(Color.WHITE, 17).apply { background = rounded(Color.WHITE, 20) }
-        box.addView(text("PROFIL SEPEDA", 10, MUTED, true))
-        box.addView(text("Road bike", 16, INK, true).apply { setPadding(0, dp(5), 0, dp(14)) })
-        box.addView(text("UNIT JARAK", 10, MUTED, true))
-        box.addView(text("Kilometer (km)", 15, INK, true).apply { setPadding(0, dp(5), 0, dp(14)) })
-        box.addView(text("PENYIMPANAN", 10, MUTED, true))
-        box.addView(text("Lokal di perangkat · berfungsi tanpa internet", 14, INK, true).apply { setPadding(0, dp(5), 0, dp(14)) })
-        box.addView(text("KOMPATIBILITAS", 10, MUTED, true))
-        box.addView(text("Android 8.0 atau lebih baru", 14, INK, true).apply { setPadding(0, dp(5), 0, 0) })
-        root.addView(box)
-        root.addView(text("Gowes Offline", 12, MUTED, false).apply { gravity = Gravity.CENTER; setPadding(0, dp(22), 0, 0) })
-    }
-
     private fun showRideDetail(ride: JSONObject, date: String) {
         root.findViewWithTag<View>("ride-detail")?.let { root.removeView(it) }
         val points = ride.optJSONArray("points")?.toString() ?: "[]"
@@ -304,12 +234,12 @@ class MainActivity : Activity() {
         val elapsed = ride.optLong("elapsed")
         val ascent = ride.optDouble("ascent")
         val avg = if (elapsed > 0) distance / (elapsed / 3_600_000.0) / 1000 else 0.0
-        val detail = column(Color.WHITE, 16).apply { tag = "ride-detail"; background = rounded(Color.WHITE, 20) }
-        detail.addView(text("DETAIL PERJALANAN", 16, INK, true))
+        val detail = column(Color.rgb(22, 30, 31), 16).apply { tag = "ride-detail"; background = rounded(Color.rgb(22, 30, 31), 20) }
+        detail.addView(text("DETAIL PERJALANAN", 16, Color.WHITE, true))
         detail.addView(text(date, 12, MUTED, false).apply { setPadding(0, dp(5), 0, dp(12)) })
         val map = RouteView(this).apply { setPoints(points) }
         detail.addView(map, LinearLayout.LayoutParams(-1, dp(210)))
-        detail.addView(text(String.format(Locale("id", "ID"), "%.2f km    %.1f km/j    %.0f m tanjakan", distance / 1000, avg, ascent), 15, INK, true).apply { setPadding(0, dp(13), 0, dp(3)) })
+        detail.addView(text(String.format(Locale("id", "ID"), "%.2f km    %.1f km/j    %.0f m tanjakan", distance / 1000, avg, ascent), 15, Color.WHITE, true).apply { setPadding(0, dp(13), 0, dp(3)) })
         detail.addView(text("Durasi ${elapsed / 3_600_000}:" + String.format(Locale.US, "%02d:%02d", elapsed / 60_000 % 60, elapsed / 1000 % 60) + "  •  ${ride.optJSONArray("points")?.length() ?: 0} titik GPS", 12, MUTED, false))
         detail.addView(text("PROFIL KETINGGIAN", 11, MUTED, true).apply { setPadding(0, dp(18), 0, dp(6)) })
         detail.addView(ProfileView(this, points), LinearLayout.LayoutParams(-1, dp(150)))
@@ -320,7 +250,7 @@ class MainActivity : Activity() {
             else -> String.format(Locale("id", "ID"), "Rata-rata %.1f km/j • %.0f m tanjakan per km. Bandingkan kecepatan pada rute dan kondisi yang serupa untuk melihat perubahan performa.", avg, climbPerKm)
         }
         detail.addView(text("RINGKASAN DATA", 11, MUTED, true).apply { setPadding(0, dp(16), 0, dp(5)) })
-        detail.addView(text(insight, 13, INK, false))
+        detail.addView(text(insight, 13, Color.WHITE, false))
         root.addView(detail)
         detail.post { detail.parent?.let { (it as? ScrollView)?.smoothScrollTo(0, detail.bottom) } }
     }
@@ -328,12 +258,12 @@ class MainActivity : Activity() {
     private fun showSummaryChart() {
         root.findViewWithTag<View>("summary-chart")?.let { root.removeView(it) }
         val history = try { JSONArray(prefs.getString("history", "[]")) } catch (_: Exception) { JSONArray() }
-        val box = column(Color.WHITE, 14).apply { tag = "summary-chart"; background = rounded(Color.WHITE, 20) }
+        val box = column(Color.rgb(22, 30, 31), 14).apply { tag = "summary-chart"; background = rounded(Color.rgb(22, 30, 31), 20) }
         box.addView(text("REKAP JARAK PER PERJALANAN", 12, MUTED, true))
         box.addView(SummaryChartView(this, history), LinearLayout.LayoutParams(-1, dp(190)).apply { topMargin = dp(10) })
         val totalKm = (0 until history.length()).sumOf { history.optJSONObject(it)?.optDouble("distance") ?: 0.0 } / 1000
         val totalAscent = (0 until history.length()).sumOf { history.optJSONObject(it)?.optDouble("ascent") ?: 0.0 }
-        box.addView(text(String.format(Locale("id", "ID"), "%d perjalanan  •  %.1f km total  •  %.0f m total tanjakan", history.length(), totalKm, totalAscent), 13, INK, true).apply { setPadding(0, dp(10), 0, 0) })
+        box.addView(text(String.format(Locale("id", "ID"), "%d perjalanan  •  %.1f km total  •  %.0f m total tanjakan", history.length(), totalKm, totalAscent), 13, Color.WHITE, true).apply { setPadding(0, dp(10), 0, 0) })
         box.addView(text("Bandingkan jarak dari perjalanan ke perjalanan. Untuk menilai perubahan performa, bandingkan kecepatan rata-rata pada rute, durasi, dan kondisi yang serupa; GPS dan elevasi memiliki ketidakpastian pengukuran.", 12, MUTED, false).apply { setPadding(0, dp(6), 0, 0) })
         root.addView(box)
         box.post { (root.parent as? ScrollView)?.smoothScrollTo(0, box.bottom) }
@@ -344,18 +274,18 @@ class MainActivity : Activity() {
     override fun onDestroy() { try { unregisterReceiver(tickReceiver) } catch (_: Exception) { }; super.onDestroy() }
 
     private class RouteView(context: Context, private val animate: Boolean = false) : View(context) {
-        private val line = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = ACCENT_DARK; style = Paint.Style.STROKE; strokeWidth = 5f; strokeCap = Paint.Cap.ROUND; strokeJoin = Paint.Join.ROUND }
-        private val grid = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0x20FFFFFF; strokeWidth = 1f }
+        private val line = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = GREEN; style = Paint.Style.STROKE; strokeWidth = 5f; strokeCap = Paint.Cap.ROUND; strokeJoin = Paint.Join.ROUND }
+        private val grid = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0xFF293033.toInt(); strokeWidth = 1f }
         private val dot = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = GREEN; style = Paint.Style.FILL }
         private val endDot = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0xFFFF8A72.toInt(); style = Paint.Style.FILL }
         private val pulse = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = GREEN; style = Paint.Style.STROKE; strokeWidth = 2.5f }
-        private val pulseEnd = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0xFFD88A52.toInt(); style = Paint.Style.STROKE; strokeWidth = 2.5f }
+        private val pulseEnd = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0xFFFF8A72.toInt(); style = Paint.Style.STROKE; strokeWidth = 2.5f }
         private val markerText = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.WHITE; textSize = 11f; typeface = android.graphics.Typeface.DEFAULT_BOLD }
         private var recording = false
         private var pulsePhase = 0f
         private var pulseAnimator: ValueAnimator? = null
         private var coordinates = emptyList<Pair<Double, Double>>()
-        init { setBackgroundColor(Color.TRANSPARENT) }
+        init { setBackgroundColor(Color.rgb(20, 24, 26)) }
         fun setPoints(value: String, isRecording: Boolean = false) {
             recording = isRecording
             coordinates = try {
@@ -432,15 +362,15 @@ class MainActivity : Activity() {
             canvas.drawText(if (isStart) "S" else if (recording) "LIVE" else "E", x + 9f, y - 8f, markerText)
             markerText.clearShadowLayer()
         }
-        companion object { private const val GREEN = ACCENT_DARK }
+        companion object { private const val GREEN = 0xFFB7F36B.toInt() }
     }
 
     private class ProfileView(context: Context, value: String) : View(context) {
-        private val axis = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = MUTED; textSize = 11f }
-        private val graph = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = ACCENT_DARK; style = Paint.Style.STROKE; strokeWidth = 4f; strokeCap = Paint.Cap.ROUND; strokeJoin = Paint.Join.ROUND }
-        private val fill = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0x3374A943; style = Paint.Style.FILL }
+        private val axis = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0xFF7D898C.toInt(); textSize = 11f }
+        private val graph = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = GREEN; style = Paint.Style.STROKE; strokeWidth = 4f; strokeCap = Paint.Cap.ROUND; strokeJoin = Paint.Join.ROUND }
+        private val fill = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0x3333CC66; style = Paint.Style.FILL }
         private val altitudes = try { val a = JSONArray(value); (0 until a.length()).map { a.optJSONObject(it)?.optDouble("alt", Double.NaN) ?: Double.NaN }.filter { it.isFinite() } } catch (_: Exception) { emptyList() }
-        init { setBackgroundColor(Color.TRANSPARENT) }
+        init { setBackgroundColor(Color.rgb(20, 24, 26)) }
         override fun onDraw(canvas: Canvas) {
             super.onDraw(canvas)
             if (altitudes.size < 2 || altitudes.maxOrNull()!! - altitudes.minOrNull()!! < 0.5) {
@@ -461,8 +391,8 @@ class MainActivity : Activity() {
 
     private class SummaryChartView(context: Context, private val rides: JSONArray) : View(context) {
         private val label = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = MUTED; textSize = 11f; textAlign = Paint.Align.CENTER }
-        private val bar = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = ACCENT_DARK; style = Paint.Style.FILL }
-        init { setBackgroundColor(Color.TRANSPARENT) }
+        private val bar = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = GREEN; style = Paint.Style.FILL }
+        init { setBackgroundColor(Color.rgb(20, 24, 26)) }
         override fun onDraw(canvas: Canvas) {
             super.onDraw(canvas)
             if (rides.length() == 0) { canvas.drawText("Belum ada data perjalanan", width / 2f, height / 2f, label); return }
@@ -483,43 +413,10 @@ class MainActivity : Activity() {
         }
     }
 
-    private inner class BikeView(context: Context) : View(context) {
-        private val photo: Bitmap? by lazy { BitmapFactory.decodeResource(resources, R.drawable.sepeda, BitmapFactory.Options().apply { inSampleSize = 2; inPreferredConfig = Bitmap.Config.RGB_565 }) }
-        private val shade = Paint(Paint.ANTI_ALIAS_FLAG)
-        private val titlePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.WHITE; textSize = sp(23f); typeface = android.graphics.Typeface.create("sans-serif-medium", android.graphics.Typeface.NORMAL) }
-        private val captionPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0xFFD0E0E4.toInt(); textSize = sp(10f); typeface = android.graphics.Typeface.DEFAULT_BOLD }
-        override fun onDraw(canvas: Canvas) {
-            super.onDraw(canvas)
-            val bounds = Rect(0, 0, width, height)
-            val radius = dp(24).toFloat()
-            val clip = Path().apply { addRoundRect(0f, 0f, width.toFloat(), height.toFloat(), radius, radius, Path.Direction.CW) }
-            canvas.save(); canvas.clipPath(clip)
-            photo?.let { bitmap ->
-                val scale = maxOf(width.toFloat() / bitmap.width, height.toFloat() / bitmap.height)
-                val outW = (bitmap.width * scale).toInt(); val outH = (bitmap.height * scale).toInt()
-                val dst = Rect((width - outW) / 2, (height - outH) / 2, (width + outW) / 2, (height + outH) / 2)
-                canvas.drawBitmap(bitmap, null, dst, null)
-            }
-            shade.shader = LinearGradient(0f, 0f, 0f, height.toFloat(), 0x11101B22, 0xE610171D.toInt(), Shader.TileMode.CLAMP)
-            canvas.drawRect(bounds, shade); shade.shader = null
-            canvas.drawRoundRect(dp(14).toFloat(), dp(14).toFloat(), dp(130).toFloat(), dp(38).toFloat(), dp(12).toFloat(), dp(12).toFloat(), Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0x4036D9C4 })
-            canvas.drawText("ROAD BIKE  ·  OFFLINE GPS", dp(23).toFloat(), dp(29).toFloat(), captionPaint)
-            canvas.drawText("Find your", dp(19).toFloat(), height - dp(49).toFloat(), titlePaint)
-            canvas.drawText("own pace.", dp(19).toFloat(), height - dp(22).toFloat(), titlePaint)
-            canvas.restore()
-        }
-        private fun sp(value: Float) = value * resources.displayMetrics.scaledDensity
-    }
-
     companion object {
         private const val REQUEST_LOCATION = 72
         private const val REQUEST_NOTIFICATIONS = 73
-        private const val GREEN = 0xFF45E0B8.toInt()
-        private const val ACCENT = 0xFF71F2D2.toInt()
-        private const val ACCENT_DARK = 0xFF36CDAF.toInt()
-        private const val CANVAS = 0xFF0A1117.toInt()
-        private const val BACKDROP = 0xFF091117.toInt()
-        private const val INK = 0xFFF3F7F7.toInt()
-        private const val MUTED = 0xFFA2B2B7.toInt()
+        private const val GREEN = 0xFFB7F36B.toInt()
+        private const val MUTED = 0xFF9DA8AA.toInt()
     }
 }
