@@ -262,8 +262,8 @@ class MainActivity : Activity() {
         if (plannedPoints.size >= 2) {
             mapView.overlays.add(Polyline(mapView).apply {
                 setPoints(plannedPoints)
-                outlinePaint.strokeWidth = dp(8).toFloat()
-                color = 0xFF29C9B3.toInt()
+                setWidth(dp(8).toFloat())
+                setColor(0xFF29C9B3.toInt())
             })
         }
         if (plannedPoints.isNotEmpty()) {
@@ -273,7 +273,7 @@ class MainActivity : Activity() {
         val active = try { JSONArray(activeKey) } catch (_: Exception) { JSONArray() }
         val recorded = (0 until active.length()).mapNotNull { i -> active.optJSONObject(i)?.let { GeoPoint(it.optDouble("lat"), it.optDouble("lon")) } }
         if (recorded.size >= 2) mapView.overlays.add(Polyline(mapView).apply {
-            setPoints(recorded); outlinePaint.strokeWidth = dp(5).toFloat(); color = 0xFFFF8B67.toInt()
+            setPoints(recorded); setWidth(dp(5).toFloat()); setColor(0xFFFF8B67.toInt())
         })
         mapView.invalidate()
     }
