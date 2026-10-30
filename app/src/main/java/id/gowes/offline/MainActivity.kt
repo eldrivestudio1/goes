@@ -100,6 +100,8 @@ class MainActivity : Activity() {
 
         root.addView(text("RIWAYAT GOWES", 17, Color.WHITE, true).apply { setPadding(0, dp(30), 0, dp(4)) })
         root.addView(text("Tersimpan aman di perangkat ini.", 12, MUTED, false).apply { setPadding(0, 0, 0, dp(10)) })
+        val chartButton = Button(this).apply { text = "Lihat grafik rekap"; setOnClickListener { showSummaryChart() } }
+        root.addView(chartButton, LinearLayout.LayoutParams(-1, dp(48)))
         showHistory()
     }
 
@@ -207,9 +209,55 @@ class MainActivity : Activity() {
             val item = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(15), dp(13), dp(15), dp(13)); setBackgroundColor(Color.rgb(27, 32, 34)) }
             item.addView(text(date, 12, MUTED, false))
             item.addView(text(String.format(Locale("id", "ID"), "%.2f km     %d menit     %.0f m tanjakan", km, elapsedMin, ride.optDouble("ascent")), 14, Color.WHITE, true).apply { setPadding(0, dp(5), 0, 0) })
+            val preview = RouteView(this)
+            preview.setPoints(ride.optJSONArray("points")?.toString() ?: "[]")
+            item.addView(preview, LinearLayout.LayoutParams(-1, dp(105)).apply { topMargin = dp(10) })
+            item.setOnClickListener { showRideDetail(ride, date) }
             list.addView(item, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(8) })
         }
         root.addView(list)
+    }
+
+    private fun showRideDetail(ride: JSONObject, date: String) {
+        root.findViewWithTag<View>("ride-detail")?.let { root.removeView(it) }
+        val points = ride.optJSONArray("points")?.toString() ?: "[]"
+        val distance = ride.optDouble("distance")
+        val elapsed = ride.optLong("elapsed")
+        val ascent = ride.optDouble("ascent")
+        val avg = if (elapsed > 0) distance / (elapsed / 3_600_000.0) / 1000 else 0.0
+        val detail = column(Color.rgb(27, 32, 34), 16).apply { tag = "ride-detail" }
+        detail.addView(text("DETAIL PERJALANAN", 16, Color.WHITE, true))
+        detail.addView(text(date, 12, MUTED, false).apply { setPadding(0, dp(5), 0, dp(12)) })
+        val map = RouteView(this).apply { setPoints(points) }
+        detail.addView(map, LinearLayout.LayoutParams(-1, dp(210)))
+        detail.addView(text(String.format(Locale("id", "ID"), "%.2f km    %.1f km/j    %.0f m tanjakan", distance / 1000, avg, ascent), 15, Color.WHITE, true).apply { setPadding(0, dp(13), 0, dp(3)) })
+        detail.addView(text("Durasi ${elapsed / 3_600_000}:" + String.format(Locale.US, "%02d:%02d", elapsed / 60_000 % 60, elapsed / 1000 % 60) + "  •  ${ride.optJSONArray("points")?.length() ?: 0} titik GPS", 12, MUTED, false))
+        detail.addView(text("PROFIL KETINGGIAN", 11, MUTED, true).apply { setPadding(0, dp(18), 0, dp(6)) })
+        detail.addView(ProfileView(this, points), LinearLayout.LayoutParams(-1, dp(150)))
+        val km = distance / 1000.0
+        val climbPerKm = if (km > 0) ascent / km else 0.0
+        val insight = when {
+            distance < 100 -> "Jarak GPS terlalu sedikit untuk menyimpulkan performa."
+            else -> String.format(Locale("id", "ID"), "Rata-rata %.1f km/j • %.0f m tanjakan per km. Bandingkan kecepatan pada rute dan kondisi yang serupa untuk melihat perubahan performa.", avg, climbPerKm)
+        }
+        detail.addView(text("RINGKASAN DATA", 11, MUTED, true).apply { setPadding(0, dp(16), 0, dp(5)) })
+        detail.addView(text(insight, 13, Color.WHITE, false))
+        root.addView(detail)
+        detail.post { detail.parent?.let { (it as? ScrollView)?.smoothScrollTo(0, detail.bottom) } }
+    }
+
+    private fun showSummaryChart() {
+        root.findViewWithTag<View>("summary-chart")?.let { root.removeView(it) }
+        val history = try { JSONArray(prefs.getString("history", "[]")) } catch (_: Exception) { JSONArray() }
+        val box = column(Color.rgb(27, 32, 34), 14).apply { tag = "summary-chart" }
+        box.addView(text("REKAP JARAK PER PERJALANAN", 12, MUTED, true))
+        box.addView(SummaryChartView(this, history), LinearLayout.LayoutParams(-1, dp(190)).apply { topMargin = dp(10) })
+        val totalKm = (0 until history.length()).sumOf { history.optJSONObject(it)?.optDouble("distance") ?: 0.0 } / 1000
+        val totalAscent = (0 until history.length()).sumOf { history.optJSONObject(it)?.optDouble("ascent") ?: 0.0 }
+        box.addView(text(String.format(Locale("id", "ID"), "%d perjalanan  •  %.1f km total  •  %.0f m total tanjakan", history.length(), totalKm, totalAscent), 13, Color.WHITE, true).apply { setPadding(0, dp(10), 0, 0) })
+        box.addView(text("Bandingkan jarak dari perjalanan ke perjalanan. Untuk menilai perubahan performa, bandingkan kecepatan rata-rata pada rute, durasi, dan kondisi yang serupa; GPS dan elevasi memiliki ketidakpastian pengukuran.", 12, MUTED, false).apply { setPadding(0, dp(6), 0, 0) })
+        root.addView(box)
+        box.post { (root.parent as? ScrollView)?.smoothScrollTo(0, box.bottom) }
     }
 
     override fun onResume() { super.onResume(); handler.post(ticker); refreshStats() }
@@ -243,20 +291,73 @@ class MainActivity : Activity() {
                 canvas.drawText("Jejak GPS akan tampil di sini", width / 2f, height / 2f, p)
                 return
             }
-            val lats = coordinates.map { it.first }; val lons = coordinates.map { it.second }
-            val minLat = lats.minOrNull()!!; val maxLat = lats.maxOrNull()!!
-            val minLon = lons.minOrNull()!!; val maxLon = lons.maxOrNull()!!
-            val latSpan = (maxLat - minLat).coerceAtLeast(0.00001); val lonSpan = (maxLon - minLon).coerceAtLeast(0.00001)
+            val meanLat = coordinates.map { it.first }.average()
+            val projected = coordinates.map { (it.second * kotlin.math.cos(Math.toRadians(meanLat))) to it.first }
+            val minX = projected.minOf { it.first }; val maxX = projected.maxOf { it.first }
+            val minY = projected.minOf { it.second }; val maxY = projected.maxOf { it.second }
+            val spanX = (maxX - minX).coerceAtLeast(0.00001); val spanY = (maxY - minY).coerceAtLeast(0.00001)
+            val scale = minOf((width - inset * 2) / spanX, (height - inset * 2) / spanY)
+            val centerX = (minX + maxX) / 2; val centerY = (minY + maxY) / 2
             val path = Path()
-            coordinates.forEachIndexed { index, point ->
-                val x = inset + ((point.second - minLon) / lonSpan * (width - inset * 2)).toFloat()
-                val y = height - inset - ((point.first - minLat) / latSpan * (height - inset * 2)).toFloat()
+            projected.forEachIndexed { index, point ->
+                val x = width / 2f + ((point.first - centerX) * scale).toFloat()
+                val y = height / 2f - ((point.second - centerY) * scale).toFloat()
                 if (index == 0) path.moveTo(x, y) else path.lineTo(x, y)
                 if (index == coordinates.lastIndex) canvas.drawCircle(x, y, 6f, dot)
             }
+            val first = projected.first()
+            canvas.drawCircle(width / 2f + ((first.first - centerX) * scale).toFloat(), height / 2f - ((first.second - centerY) * scale).toFloat(), 5f, dot)
             canvas.drawPath(path, line)
         }
         companion object { private const val GREEN = 0xFFB7F36B.toInt() }
+    }
+
+    private class ProfileView(context: Context, value: String) : View(context) {
+        private val axis = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0xFF7D898C.toInt(); textSize = 11f }
+        private val graph = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = GREEN; style = Paint.Style.STROKE; strokeWidth = 4f; strokeCap = Paint.Cap.ROUND; strokeJoin = Paint.Join.ROUND }
+        private val fill = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0x3333CC66; style = Paint.Style.FILL }
+        private val altitudes = try { val a = JSONArray(value); (0 until a.length()).map { a.optJSONObject(it)?.optDouble("alt", Double.NaN) ?: Double.NaN }.filter { it.isFinite() } } catch (_: Exception) { emptyList() }
+        init { setBackgroundColor(Color.rgb(20, 24, 26)) }
+        override fun onDraw(canvas: Canvas) {
+            super.onDraw(canvas)
+            if (altitudes.size < 2 || altitudes.maxOrNull()!! - altitudes.minOrNull()!! < 0.5) {
+                axis.textAlign = Paint.Align.CENTER; canvas.drawText("Data ketinggian GPS belum cukup", width / 2f, height / 2f, axis); return
+            }
+            val min = altitudes.minOrNull()!!; val max = altitudes.maxOrNull()!!; val pad = 18f
+            val path = Path(); val area = Path()
+            altitudes.forEachIndexed { i, h ->
+                val x = pad + i.toFloat() / (altitudes.size - 1) * (width - pad * 2)
+                val y = height - pad - ((h - min) / (max - min) * (height - pad * 2)).toFloat()
+                if (i == 0) { path.moveTo(x, y); area.moveTo(x, height - pad); area.lineTo(x, y) } else { path.lineTo(x, y); area.lineTo(x, y) }
+            }
+            area.lineTo(width - pad, height - pad); area.close(); canvas.drawPath(area, fill); canvas.drawPath(path, graph)
+            axis.textAlign = Paint.Align.LEFT; canvas.drawText("${min.toInt()} m", 6f, height - 5f, axis)
+            axis.textAlign = Paint.Align.RIGHT; canvas.drawText("${max.toInt()} m", width - 6f, 14f, axis)
+        }
+    }
+
+    private class SummaryChartView(context: Context, private val rides: JSONArray) : View(context) {
+        private val label = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = MUTED; textSize = 11f; textAlign = Paint.Align.CENTER }
+        private val bar = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = GREEN; style = Paint.Style.FILL }
+        init { setBackgroundColor(Color.rgb(20, 24, 26)) }
+        override fun onDraw(canvas: Canvas) {
+            super.onDraw(canvas)
+            if (rides.length() == 0) { canvas.drawText("Belum ada data perjalanan", width / 2f, height / 2f, label); return }
+            val count = minOf( rides.length(), 12 )
+            val start = rides.length() - count
+            val max = (start until rides.length()).maxOf { rides.optJSONObject(it)?.optDouble("distance") ?: 0.0 }.coerceAtLeast(1.0)
+            val slot = width.toFloat() / count
+            for (j in 0 until count) {
+                val ride = rides.optJSONObject(start + j) ?: continue
+                val km = ride.optDouble("distance") / 1000
+                val heightBar = ((ride.optDouble("distance") / max) * (height - 42)).toFloat()
+                val left = j * slot + slot * 0.2f
+                canvas.drawRoundRect(left, height - 24 - heightBar, left + slot * 0.6f, height - 24f, 7f, 7f, bar)
+                canvas.drawText(String.format(Locale.US, "%.1f", km), left + slot * 0.3f, height - 8f, label)
+            }
+            label.textAlign = Paint.Align.LEFT
+            canvas.drawText("km", 8f, 16f, label)
+        }
     }
 
     companion object {

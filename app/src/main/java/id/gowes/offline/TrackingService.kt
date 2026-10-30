@@ -23,6 +23,7 @@ class TrackingService : Service(), LocationListener {
     private var startedAtElapsed = 0L
     private var points = JSONArray()
     private var stopped = false
+    private var altitudeBaseline: Double? = null
 
     override fun onCreate() {
         super.onCreate()
@@ -74,7 +75,7 @@ class TrackingService : Service(), LocationListener {
                 broadcastTick()
                 return START_NOT_STICKY
             }
-            locationManager.requestLocationUpdates(LocationManager.GPS_PROVIDER, 2500L, 5f, this)
+            locationManager.requestLocationUpdates(LocationManager.GPS_PROVIDER, 1000L, 1f, this)
         } catch (_: SecurityException) {
             getSharedPreferences("rides", MODE_PRIVATE).edit().putBoolean("recording", false).apply()
             stopSelf()
@@ -86,19 +87,38 @@ class TrackingService : Service(), LocationListener {
     }
 
     override fun onLocationChanged(location: Location) {
-        if (location.hasAccuracy() && location.accuracy > 35f) return
+        if (location.hasAccuracy() && location.accuracy > 20f) return
         val prev = previous
         if (prev != null) {
             val segment = location.distanceTo(prev)
-            // Reject GPS jumps and stationary noise; keep the last accepted fix for the next segment.
-            if (segment in 3f..150f) distanceMeters += segment
-            if (location.hasAltitude() && prev.hasAltitude()) {
-                val gain = location.altitude - prev.altitude
-                if (gain in 2.0..100.0) ascentMeters += gain
+            val elapsedSeconds = ((location.time - prev.time).coerceAtLeast(1L)) / 1000.0
+            val speed = segment / elapsedSeconds
+            // Reject implausible jumps; retain short segments so corners are represented.
+            if (segment > 100f || speed > 15.0) return
+            else {
+                if (segment >= 1.2f) distanceMeters += segment
+                if (location.hasAltitude() && location.hasVerticalAccuracy() && location.verticalAccuracyMeters <= 12f) {
+                    val altitude = location.altitude
+                    val baseline = altitudeBaseline
+                    if (baseline == null) altitudeBaseline = altitude
+                    else {
+                        val delta = altitude - baseline
+                        // Require sustained elevation change before counting ascent to suppress GPS altitude noise.
+                        if (delta >= 3.0) {
+                            ascentMeters += delta
+                            altitudeBaseline = altitude
+                        } else if (delta <= -3.0) altitudeBaseline = altitude
+                    }
+                }
+                points.put(JSONObject().put("lat", location.latitude).put("lon", location.longitude)
+                    .put("alt", if (location.hasAltitude()) location.altitude else 0.0)
+                    .put("time", location.time).put("accuracy", location.accuracy))
             }
+            previous = location
+        } else {
+            previous = location
         }
-        previous = location
-        points.put(JSONObject().put("lat", location.latitude).put("lon", location.longitude)
+        if (points.length() == 0) points.put(JSONObject().put("lat", location.latitude).put("lon", location.longitude)
             .put("alt", if (location.hasAltitude()) location.altitude else 0.0)
             .put("time", location.time).put("accuracy", location.accuracy))
         saveActive()
