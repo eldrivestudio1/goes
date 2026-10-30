@@ -10,8 +10,13 @@ import android.content.pm.PackageManager
 import android.location.LocationManager
 import android.graphics.Canvas
 import android.graphics.Color
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import android.graphics.Paint
 import android.graphics.Path
+import android.graphics.Rect
+import android.graphics.LinearGradient
+import android.graphics.Shader
 import android.graphics.drawable.GradientDrawable
 import android.os.Build
 import android.os.Bundle
@@ -53,9 +58,9 @@ class MainActivity : Activity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        window.statusBarColor = Color.rgb(246, 245, 240)
-        window.navigationBarColor = Color.rgb(255, 255, 255)
-        if (Build.VERSION.SDK_INT >= 23) window.decorView.systemUiVisibility = View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR
+        window.statusBarColor = 0xFF0A1117.toInt()
+        window.navigationBarColor = 0xFF0A1117.toInt()
+        if (Build.VERSION.SDK_INT >= 23) window.decorView.systemUiVisibility = 0
         buildUi()
         val filter = IntentFilter(TrackingService.ACTION_TICK)
         if (Build.VERSION.SDK_INT >= 33) registerReceiver(tickReceiver, filter, RECEIVER_NOT_EXPORTED) else {
@@ -66,12 +71,12 @@ class MainActivity : Activity() {
     }
 
     private fun buildUi() {
-        shell = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setBackgroundColor(CANVAS) }
+        shell = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; background = GradientDrawable(GradientDrawable.Orientation.TL_BR, intArrayOf(BACKDROP, 0xFF111D25.toInt(), BACKDROP)) }
         val scroll = ScrollView(this).apply { isFillViewport = true; overScrollMode = View.OVER_SCROLL_NEVER }
         root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(20), dp(18), dp(20), dp(26))
-            setBackgroundColor(CANVAS)
+            setBackgroundColor(Color.TRANSPARENT)
         }
         scroll.addView(root)
         shell.addView(scroll, LinearLayout.LayoutParams(-1, 0, 1f))
@@ -86,13 +91,14 @@ class MainActivity : Activity() {
     }
 
     private fun bottomNavigation(): LinearLayout = LinearLayout(this).apply {
-        setBackgroundColor(Color.WHITE); gravity = Gravity.CENTER
+        background = GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM, intArrayOf(0xF21B2932.toInt(), 0xF20D171E.toInt())).apply { cornerRadii = floatArrayOf(dp(22).toFloat(), dp(22).toFloat(), dp(22).toFloat(), dp(22).toFloat(), 0f, 0f, 0f, 0f); setStroke(dp(1), 0x24FFFFFF) }
+        gravity = Gravity.CENTER
         val labels = listOf("Beranda", "Riwayat", "Analitik", "Pengaturan")
         val icons = listOf("⌂", "◷", "▥", "⚙")
         labels.forEachIndexed { index, label ->
             val selected = page == index
-            val item = LinearLayout(this@MainActivity).apply { orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER; setOnClickListener { page = index; buildUi() } }
-            item.addView(text(icons[index], 20, if (selected) ACCENT_DARK else MUTED, true).apply { gravity = Gravity.CENTER })
+            val item = LinearLayout(this@MainActivity).apply { orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER; background = if (selected) rounded(0x2636D9C4, 16) else null; setOnClickListener { page = index; buildUi() } }
+            item.addView(text(icons[index], 20, if (selected) ACCENT else MUTED, true).apply { gravity = Gravity.CENTER })
             item.addView(text(label, 10, if (selected) ACCENT_DARK else MUTED, selected).apply { gravity = Gravity.CENTER; setPadding(0, dp(2), 0, 0) })
             addView(item, LinearLayout.LayoutParams(0, -1, 1f))
         }
@@ -101,7 +107,7 @@ class MainActivity : Activity() {
     private fun showHome() {
         sectionTitle("Selamat gowes", "RIDE TRACKER  ·  SIAP MENEMANI")
         root.addView(text("ROAD BIKE  /  DAILY RIDE", 10, MUTED, true).apply { setPadding(0, dp(4), 0, dp(7)) })
-        root.addView(BikeView(this), LinearLayout.LayoutParams(-1, dp(205)))
+        root.addView(BikeView(this), LinearLayout.LayoutParams(-1, dp(230)))
         val current = prefs.getBoolean("recording", false)
         val card = column(Color.WHITE, 17).apply { background = rounded(Color.WHITE, 22) }
         card.addView(text(if (current) "PERJALANAN BERLANGSUNG" else "SIAP UNTUK BERANGKAT", 10, MUTED, true))
@@ -116,7 +122,7 @@ class MainActivity : Activity() {
         routeView = RouteView(this, animate = true).apply { background = rounded(Color.WHITE, 20) }
         root.addView(routeView, LinearLayout.LayoutParams(-1, dp(150)))
         action = Button(this).apply {
-            textSize = 15f; setTextColor(INK); isAllCaps = false; typeface = android.graphics.Typeface.DEFAULT_BOLD
+            textSize = 15f; setTextColor(BACKDROP); isAllCaps = false; typeface = android.graphics.Typeface.DEFAULT_BOLD
             background = rounded(ACCENT, 17); setOnClickListener { toggleRecording() }
         }
         root.addView(action, LinearLayout.LayoutParams(-1, dp(52)).apply { topMargin = dp(14) })
@@ -146,7 +152,11 @@ class MainActivity : Activity() {
     }
 
     private fun rounded(color: Int, radius: Int) = GradientDrawable().apply {
-        setColor(color)
+        if (color == Color.WHITE) {
+            orientation = GradientDrawable.Orientation.TOP_BOTTOM
+            colors = intArrayOf(0x24FFFFFF, 0x12FFFFFF)
+            setStroke(dp(1), 0x2EFFFFFF)
+        } else setColor(color)
         cornerRadius = dp(radius).toFloat()
     }
 
@@ -335,7 +345,7 @@ class MainActivity : Activity() {
 
     private class RouteView(context: Context, private val animate: Boolean = false) : View(context) {
         private val line = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = ACCENT_DARK; style = Paint.Style.STROKE; strokeWidth = 5f; strokeCap = Paint.Cap.ROUND; strokeJoin = Paint.Join.ROUND }
-        private val grid = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0xFFE7E5DF.toInt(); strokeWidth = 1f }
+        private val grid = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0x20FFFFFF; strokeWidth = 1f }
         private val dot = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = GREEN; style = Paint.Style.FILL }
         private val endDot = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0xFFFF8A72.toInt(); style = Paint.Style.FILL }
         private val pulse = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = GREEN; style = Paint.Style.STROKE; strokeWidth = 2.5f }
@@ -474,42 +484,42 @@ class MainActivity : Activity() {
     }
 
     private inner class BikeView(context: Context) : View(context) {
-        private val frame = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = ACCENT_DARK; style = Paint.Style.STROKE; strokeWidth = 7f; strokeCap = Paint.Cap.ROUND; strokeJoin = Paint.Join.ROUND }
-        private val dark = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = INK; style = Paint.Style.STROKE; strokeWidth = 5f; strokeCap = Paint.Cap.ROUND; strokeJoin = Paint.Join.ROUND }
-        private val wheel = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0xFF555956.toInt(); style = Paint.Style.STROKE; strokeWidth = 3f }
-        private val hub = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = ACCENT_DARK; style = Paint.Style.FILL }
-        private val shine = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0xFFE2E0D9.toInt(); style = Paint.Style.STROKE; strokeWidth = 1f }
+        private val photo: Bitmap? by lazy { BitmapFactory.decodeResource(resources, R.drawable.sepeda, BitmapFactory.Options().apply { inSampleSize = 2; inPreferredConfig = Bitmap.Config.RGB_565 }) }
+        private val shade = Paint(Paint.ANTI_ALIAS_FLAG)
+        private val titlePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.WHITE; textSize = sp(23f); typeface = android.graphics.Typeface.create("sans-serif-medium", android.graphics.Typeface.NORMAL) }
+        private val captionPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0xFFD0E0E4.toInt(); textSize = sp(10f); typeface = android.graphics.Typeface.DEFAULT_BOLD }
         override fun onDraw(canvas: Canvas) {
             super.onDraw(canvas)
-            canvas.drawRoundRect(0f, 0f, width.toFloat(), height.toFloat(), dp(24).toFloat(), dp(24).toFloat(), Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0xFFE7E5DE.toInt() })
-            val cx = width / 2f; val top = dp(17).toFloat(); val bottom = height - dp(17).toFloat()
-            // Front view road bike: narrow wheel, fork, stem and drop bars.
-            canvas.drawRoundRect(cx - dp(9), top, cx + dp(9), bottom, dp(8).toFloat(), dp(8).toFloat(), wheel)
-            canvas.drawLine(cx, top + dp(10), cx, bottom - dp(18), frame)
-            canvas.drawLine(cx, top + dp(40), cx - dp(7), bottom - dp(18), shine)
-            canvas.drawLine(cx, top + dp(40), cx + dp(7), bottom - dp(18), shine)
-            val barY = top + dp(47); val endX = width * .31f
-            canvas.drawLine(cx, barY, cx - dp(28), barY - dp(9), dark)
-            canvas.drawLine(cx - dp(28), barY - dp(9), endX, barY + dp(3), dark)
-            canvas.drawLine(endX, barY + dp(3), endX + dp(11), barY + dp(3), dark)
-            canvas.drawLine(cx, barY, cx + dp(28), barY - dp(9), dark)
-            canvas.drawLine(cx + dp(28), barY - dp(9), width - endX, barY + dp(3), dark)
-            canvas.drawLine(width - endX, barY + dp(3), width - endX - dp(11), barY + dp(3), dark)
-            canvas.drawRoundRect(cx - dp(11), barY - dp(5), cx + dp(11), barY + dp(14), dp(8).toFloat(), dp(8).toFloat(), Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0xFF343936.toInt() })
-            canvas.drawCircle(cx, barY + dp(23), dp(8).toFloat(), hub)
-            canvas.drawCircle(cx, barY + dp(23), dp(3).toFloat(), dark)
-            canvas.drawLine(width * .23f, height - dp(13).toFloat(), width * .77f, height - dp(13).toFloat(), Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0xFFCECCC5.toInt(); strokeWidth = dp(1).toFloat() })
+            val bounds = Rect(0, 0, width, height)
+            val radius = dp(24).toFloat()
+            val clip = Path().apply { addRoundRect(0f, 0f, width.toFloat(), height.toFloat(), radius, radius, Path.Direction.CW) }
+            canvas.save(); canvas.clipPath(clip)
+            photo?.let { bitmap ->
+                val scale = maxOf(width.toFloat() / bitmap.width, height.toFloat() / bitmap.height)
+                val outW = (bitmap.width * scale).toInt(); val outH = (bitmap.height * scale).toInt()
+                val dst = Rect((width - outW) / 2, (height - outH) / 2, (width + outW) / 2, (height + outH) / 2)
+                canvas.drawBitmap(bitmap, null, dst, null)
+            }
+            shade.shader = LinearGradient(0f, 0f, 0f, height.toFloat(), 0x11101B22, 0xE610171D.toInt(), Shader.TileMode.CLAMP)
+            canvas.drawRect(bounds, shade); shade.shader = null
+            canvas.drawRoundRect(dp(14).toFloat(), dp(14).toFloat(), dp(130).toFloat(), dp(38).toFloat(), dp(12).toFloat(), dp(12).toFloat(), Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0x4036D9C4 })
+            canvas.drawText("ROAD BIKE  ·  OFFLINE GPS", dp(23).toFloat(), dp(29).toFloat(), captionPaint)
+            canvas.drawText("Find your", dp(19).toFloat(), height - dp(49).toFloat(), titlePaint)
+            canvas.drawText("own pace.", dp(19).toFloat(), height - dp(22).toFloat(), titlePaint)
+            canvas.restore()
         }
+        private fun sp(value: Float) = value * resources.displayMetrics.scaledDensity
     }
 
     companion object {
         private const val REQUEST_LOCATION = 72
         private const val REQUEST_NOTIFICATIONS = 73
-        private const val GREEN = 0xFFB7F36B.toInt()
-        private const val ACCENT = 0xFFFFB83F.toInt()
-        private const val ACCENT_DARK = 0xFFE09A18.toInt()
-        private const val CANVAS = 0xFFF6F5F0.toInt()
-        private const val INK = 0xFF202321.toInt()
-        private const val MUTED = 0xFF828782.toInt()
+        private const val GREEN = 0xFF45E0B8.toInt()
+        private const val ACCENT = 0xFF71F2D2.toInt()
+        private const val ACCENT_DARK = 0xFF36CDAF.toInt()
+        private const val CANVAS = 0xFF0A1117.toInt()
+        private const val BACKDROP = 0xFF091117.toInt()
+        private const val INK = 0xFFF3F7F7.toInt()
+        private const val MUTED = 0xFFA2B2B7.toInt()
     }
 }
