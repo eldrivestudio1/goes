@@ -162,10 +162,17 @@ class MainActivity : Activity() {
     private fun setupMap() {
         val base = File(filesDir, "osmdroid")
         val tiles = File(base, "tiles")
+        val userAgent = "GowesOffline/${BuildConfig.VERSION_NAME} (+https://github.com/eldrivestudio1/goes)"
+        val mapPrefs = getSharedPreferences("map-config", MODE_PRIVATE)
+        // Remove tiles that may have stored the old 403 policy error image.
+        if (mapPrefs.getString("tile_user_agent", null) != userAgent) {
+            tiles.deleteRecursively()
+            mapPrefs.edit().putString("tile_user_agent", userAgent).apply()
+        }
         base.mkdirs(); tiles.mkdirs()
         Configuration.getInstance().apply {
-            load(this@MainActivity, getSharedPreferences("map-config", MODE_PRIVATE))
-            userAgentValue = packageName
+            load(this@MainActivity, mapPrefs)
+            userAgentValue = userAgent
             osmdroidBasePath = base
             osmdroidTileCache = tiles
         }
