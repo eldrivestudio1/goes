@@ -11,6 +11,7 @@ import android.location.LocationManager
 import android.os.Build
 import android.os.Bundle
 import android.os.IBinder
+import android.os.PowerManager
 import android.os.SystemClock
 import org.json.JSONArray
 import org.json.JSONObject
@@ -24,6 +25,8 @@ class TrackingService : Service(), LocationListener {
     private var points = JSONArray()
     private var stopped = false
     private var altitudeBaseline: Double? = null
+    private var lastPointFlushElapsed = 0L
+    private var wakeLock: PowerManager.WakeLock? = null
 
     override fun onCreate() {
         super.onCreate()
@@ -45,9 +48,16 @@ class TrackingService : Service(), LocationListener {
             }
             distanceMeters = prefs.getFloat("active_distance", 0f).toDouble()
             ascentMeters = prefs.getFloat("active_ascent", 0f).toDouble()
-            points = try { JSONArray(prefs.getString("active_points", "[]")) } catch (_: Exception) { JSONArray() }
+            val savedPoints = try { JSONArray(prefs.getString("active_points", "[]")) } catch (_: Exception) { JSONArray() }
+            // Prefer the in-memory route from the active service; storage may lag by a few seconds.
+            if (savedPoints.length() > points.length()) points = savedPoints
             startedAtElapsed = prefs.getLong("active_started_at", SystemClock.elapsedRealtime())
             finishRide()
+            return START_NOT_STICKY
+        }
+        // A sticky restart with no active ride must never be mistaken for a fresh user start.
+        if (intent == null && !prefs.getBoolean("recording", false)) {
+            stopSelf()
             return START_NOT_STICKY
         }
         if (!prefs.getBoolean("recording", false)) {
@@ -55,6 +65,7 @@ class TrackingService : Service(), LocationListener {
             ascentMeters = 0.0
             points = JSONArray()
             previous = null
+            lastPointFlushElapsed = SystemClock.elapsedRealtime()
             startedAtElapsed = SystemClock.elapsedRealtime()
             prefs.edit().putBoolean("recording", true)
                 .putLong("active_started_at", startedAtElapsed)
@@ -64,13 +75,17 @@ class TrackingService : Service(), LocationListener {
             // Keep a ride recoverable if Android recreates the foreground service.
             distanceMeters = prefs.getFloat("active_distance", 0f).toDouble()
             ascentMeters = prefs.getFloat("active_ascent", 0f).toDouble()
-            points = try { JSONArray(prefs.getString("active_points", "[]")) } catch (_: Exception) { JSONArray() }
+            val savedPoints = try { JSONArray(prefs.getString("active_points", "[]")) } catch (_: Exception) { JSONArray() }
+            if (savedPoints.length() > points.length()) points = savedPoints
             startedAtElapsed = prefs.getLong("active_started_at", SystemClock.elapsedRealtime())
+            if (previous == null) restoreLastLocation()
         }
+        acquireWakeLock()
         locationManager = getSystemService(LOCATION_SERVICE) as LocationManager
         try {
             if (!locationManager.isProviderEnabled(LocationManager.GPS_PROVIDER)) {
                 prefs.edit().putBoolean("recording", false).apply()
+                releaseWakeLock()
                 stopSelf()
                 broadcastTick()
                 return START_NOT_STICKY
@@ -78,8 +93,12 @@ class TrackingService : Service(), LocationListener {
             locationManager.requestLocationUpdates(LocationManager.GPS_PROVIDER, 1000L, 1f, this)
         } catch (_: SecurityException) {
             getSharedPreferences("rides", MODE_PRIVATE).edit().putBoolean("recording", false).apply()
+            releaseWakeLock()
             stopSelf()
         } catch (_: IllegalArgumentException) {
+            releaseWakeLock()
+            getSharedPreferences("rides", MODE_PRIVATE).edit().putBoolean("recording", false).apply()
+            stopSelf()
             broadcastTick()
         }
         broadcastTick()
@@ -125,17 +144,50 @@ class TrackingService : Service(), LocationListener {
         broadcastTick()
     }
 
-    private fun saveActive() {
+    private fun saveActive(forcePoints: Boolean = false) {
         val elapsed = (SystemClock.elapsedRealtime() - startedAtElapsed).coerceAtLeast(0L)
-        getSharedPreferences("rides", MODE_PRIVATE).edit()
-            .putString("active_points", points.toString()).putFloat("active_distance", distanceMeters.toFloat())
-            .putFloat("active_ascent", ascentMeters.toFloat()).putLong("active_elapsed", elapsed).apply()
+        val now = SystemClock.elapsedRealtime()
+        val editor = getSharedPreferences("rides", MODE_PRIVATE).edit()
+            .putFloat("active_distance", distanceMeters.toFloat())
+            .putFloat("active_ascent", ascentMeters.toFloat()).putLong("active_elapsed", elapsed)
+        // Keep route serialization off the hot GPS path; persist it every 5s and always on finish.
+        if (forcePoints || now - lastPointFlushElapsed >= 5_000L) {
+            editor.putString("active_points", points.toString())
+            lastPointFlushElapsed = now
+        }
+        editor.apply()
+    }
+
+    private fun restoreLastLocation() {
+        if (points.length() == 0) return
+        val point = points.optJSONObject(points.length() - 1) ?: return
+        previous = Location(LocationManager.GPS_PROVIDER).apply {
+            latitude = point.optDouble("lat")
+            longitude = point.optDouble("lon")
+            time = point.optLong("time", System.currentTimeMillis())
+            if (point.has("alt")) altitude = point.optDouble("alt")
+            if (point.has("accuracy")) accuracy = point.optDouble("accuracy").toFloat()
+        }
+    }
+
+    private fun acquireWakeLock() {
+        if (wakeLock?.isHeld == true) return
+        val power = getSystemService(POWER_SERVICE) as PowerManager
+        wakeLock = power.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "$packageName:RideTracking").apply {
+            setReferenceCounted(false)
+            acquire()
+        }
+    }
+
+    private fun releaseWakeLock() {
+        wakeLock?.let { if (it.isHeld) it.release() }
+        wakeLock = null
     }
 
     private fun finishRide() {
         if (stopped) return
         stopped = true
-        saveActive()
+        saveActive(forcePoints = true)
         val prefs = getSharedPreferences("rides", MODE_PRIVATE)
         val ride = JSONObject().put("date", System.currentTimeMillis())
             .put("distance", distanceMeters).put("ascent", ascentMeters)
@@ -145,6 +197,7 @@ class TrackingService : Service(), LocationListener {
         prefs.edit().putString("history", history.toString()).putBoolean("recording", false)
             .putLong("active_elapsed", 0L).putFloat("active_distance", 0f).putFloat("active_ascent", 0f)
             .remove("active_started_at").remove("active_points").apply()
+        releaseWakeLock()
         broadcastTick()
         stopSelf()
     }
@@ -153,6 +206,7 @@ class TrackingService : Service(), LocationListener {
 
     override fun onDestroy() {
         if (::locationManager.isInitialized) try { locationManager.removeUpdates(this) } catch (_: Exception) { }
+        releaseWakeLock()
         // Do not clear recording on system recreation; START_STICKY resumes it from saved state.
         super.onDestroy()
     }
