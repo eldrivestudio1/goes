@@ -94,7 +94,7 @@ class MainActivity : Activity() {
             val item = LinearLayout(this@MainActivity).apply { orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER; setOnClickListener { page = index; buildUi() } }
             item.addView(text(icons[index], 20, if (selected) ACCENT_DARK else MUTED, true).apply { gravity = Gravity.CENTER })
             item.addView(text(label, 10, if (selected) ACCENT_DARK else MUTED, selected).apply { gravity = Gravity.CENTER; setPadding(0, dp(2), 0, 0) })
-            addView(item, LayoutParams(0, -1, 1f))
+            addView(item, LinearLayout.LayoutParams(0, -1, 1f))
         }
     }
 
