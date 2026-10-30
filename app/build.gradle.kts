@@ -1,5 +1,9 @@
 plugins { id("com.android.application"); id("org.jetbrains.kotlin.android") }
 
+dependencies {
+    implementation("org.osmdroid:osmdroid-android:6.1.20")
+}
+
 android {
     namespace = "id.gowes.offline"
     compileSdk = 35

@@ -13,6 +13,7 @@ import android.graphics.Color
 import android.graphics.Paint
 import android.graphics.Path
 import android.graphics.drawable.GradientDrawable
+import android.location.Location
 import android.os.Build
 import android.os.Bundle
 import android.os.Handler
@@ -26,6 +27,15 @@ import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
 import android.widget.Toast
+import org.osmdroid.config.Configuration
+import org.osmdroid.events.MapEventsReceiver
+import org.osmdroid.tileprovider.tilesource.TileSourceFactory
+import org.osmdroid.util.GeoPoint
+import org.osmdroid.views.MapView
+import org.osmdroid.views.overlay.MapEventsOverlay
+import org.osmdroid.views.overlay.Marker
+import org.osmdroid.views.overlay.Polyline
+import java.io.File
 import org.json.JSONArray
 import org.json.JSONObject
 import java.text.SimpleDateFormat
@@ -35,8 +45,14 @@ import java.util.Locale
 class MainActivity : Activity() {
     private lateinit var root: LinearLayout
     private lateinit var stats: TextView
-    private lateinit var routeView: RouteView
+    private lateinit var mapView: MapView
     private lateinit var action: Button
+    private lateinit var planButton: Button
+    private lateinit var planInfo: TextView
+    private val plannedPoints = mutableListOf<GeoPoint>()
+    private var planMode = false
+    private var renderedPlannedRoute = ""
+    private var renderedActiveRoute = ""
     private val prefs by lazy { getSharedPreferences("rides", MODE_PRIVATE) }
     private val handler = Handler(Looper.getMainLooper())
     private val tickReceiver = object : BroadcastReceiver() {
@@ -76,6 +92,39 @@ class MainActivity : Activity() {
         root.addView(text("gowes", 32, Color.WHITE, true))
         root.addView(text("RIDE TRACKER  ·  OFFLINE GPS", 11, GREEN, true).apply { setPadding(0, dp(3), 0, dp(22)) })
 
+        root.addView(text("PETA RUTE", 12, MUTED, true).apply { setPadding(0, dp(16), 0, dp(8)) })
+        planInfo = text("Peta memuat…", 13, MUTED, false).apply { setPadding(0, 0, 0, dp(8)) }
+        root.addView(planInfo)
+        val planActions = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        planButton = Button(this).apply {
+            text = "＋  Buat rute"; textSize = 13f; isAllCaps = false; setTextColor(Color.WHITE)
+            background = rounded(Color.rgb(35, 45, 47), 14)
+            setOnClickListener { planMode = !planMode; updatePlannerStatus(); if (planMode) Toast.makeText(this@MainActivity, "Ketuk peta untuk menambahkan titik rute", Toast.LENGTH_LONG).show() }
+        }
+        planActions.addView(planButton, LinearLayout.LayoutParams(0, dp(48), 1f))
+        val saveRoute = Button(this).apply {
+            text = "Simpan rute"; textSize = 13f; isAllCaps = false; setTextColor(Color.WHITE)
+            background = rounded(Color.rgb(35, 45, 47), 14)
+            setOnClickListener { planMode = false; persistPlannedRoute(); updatePlannerStatus(); Toast.makeText(this@MainActivity, "Rute tersimpan di perangkat", Toast.LENGTH_SHORT).show() }
+        }
+        planActions.addView(saveRoute, LinearLayout.LayoutParams(0, dp(48), 1f).apply { leftMargin = dp(8) })
+        root.addView(planActions)
+        val locate = Button(this).apply {
+            text = "◎  Ke lokasi saya"; textSize = 12f; isAllCaps = false; setTextColor(MUTED)
+            background = rounded(Color.TRANSPARENT, 12)
+            setOnClickListener { centerOnMyLocation() }
+        }
+        root.addView(locate, LinearLayout.LayoutParams(-1, dp(38)))
+        val clearRoute = Button(this).apply {
+            text = "Hapus rute rencana"; textSize = 12f; isAllCaps = false; setTextColor(MUTED)
+            background = rounded(Color.TRANSPARENT, 12)
+            setOnClickListener { plannedPoints.clear(); persistPlannedRoute(); updatePlannerStatus(); refreshMapOverlays(force = true) }
+        }
+        root.addView(clearRoute, LinearLayout.LayoutParams(-1, dp(40)))
+        setupMap()
+        root.addView(mapView, LinearLayout.LayoutParams(-1, dp(360)))
+        root.addView(text("© OpenStreetMap contributors", 10, MUTED, false).apply { gravity = Gravity.END; setPadding(0, dp(4), 0, 0) })
+        updatePlannerStatus()
         val card = column(Color.rgb(22, 30, 31), 20).apply { background = rounded(Color.rgb(22, 30, 31), 22) }
         card.addView(text("PERJALANAN SAAT INI", 11, MUTED, true))
         stats = text("0,00 km", 38, Color.WHITE, true).apply { setPadding(0, dp(12), 0, dp(1)) }
@@ -88,10 +137,6 @@ class MainActivity : Activity() {
         metrics.tag = "metrics"
         card.addView(metrics)
         root.addView(card)
-
-        root.addView(text("JEJAK PERJALANAN", 12, MUTED, true).apply { setPadding(0, dp(25), 0, dp(10)) })
-        routeView = RouteView(this, animate = true).apply { background = rounded(Color.rgb(17, 24, 26), 20) }
-        root.addView(routeView, LinearLayout.LayoutParams(-1, dp(190)))
         action = Button(this).apply {
             textSize = 16f
             setTextColor(Color.rgb(12, 15, 17))
@@ -112,6 +157,118 @@ class MainActivity : Activity() {
     private fun metric(label: String, value: String): LinearLayout = column(Color.TRANSPARENT, 0).apply {
         addView(text(label, 10, MUTED, true))
         addView(text(value, 15, Color.WHITE, true).apply { tag = label })
+    }
+
+    private fun setupMap() {
+        val base = File(filesDir, "osmdroid")
+        val tiles = File(base, "tiles")
+        base.mkdirs(); tiles.mkdirs()
+        Configuration.getInstance().apply {
+            load(this@MainActivity, getSharedPreferences("map-config", MODE_PRIVATE))
+            userAgentValue = packageName
+            osmdroidBasePath = base
+            osmdroidTileCache = tiles
+        }
+        mapView = MapView(this).apply {
+            setTileSource(TileSourceFactory.MAPNIK)
+            setMultiTouchControls(true)
+            controller.setZoom(14.5)
+            controller.setCenter(GeoPoint(-6.2088, 106.8456))
+            overlays.add(MapEventsOverlay(object : MapEventsReceiver {
+                override fun singleTapConfirmedHelper(point: GeoPoint): Boolean {
+                    if (!planMode) return false
+                    plannedPoints.add(point)
+                    persistPlannedRoute()
+                    updatePlannerStatus()
+                    refreshMapOverlays(force = true)
+                    return true
+                }
+                override fun longPressHelper(point: GeoPoint): Boolean = false
+            }))
+        }
+        loadPlannedRoute()
+        val lastRecordedPoint = try {
+            val active = JSONArray(prefs.getString("active_points", "[]"))
+            active.optJSONObject(active.length() - 1)?.let { GeoPoint(it.optDouble("lat"), it.optDouble("lon")) }
+        } catch (_: Exception) { null }
+        val rememberedCenter = plannedPoints.firstOrNull() ?: lastRecordedPoint
+        if (rememberedCenter != null) mapView.controller.setCenter(rememberedCenter)
+        refreshMapOverlays(force = true)
+    }
+
+    private fun loadPlannedRoute() {
+        plannedPoints.clear()
+        val saved = try { JSONArray(prefs.getString("planned_route", "[]")) } catch (_: Exception) { JSONArray() }
+        for (i in 0 until saved.length()) saved.optJSONObject(i)?.let { point -> plannedPoints.add(GeoPoint(point.optDouble("lat"), point.optDouble("lon"))) }
+    }
+
+    private fun persistPlannedRoute() {
+        val json = JSONArray()
+        plannedPoints.forEach { json.put(JSONObject().put("lat", it.latitude).put("lon", it.longitude)) }
+        prefs.edit().putString("planned_route", json.toString()).apply()
+    }
+
+    private fun planDistanceMeters(): Double {
+        var distance = 0.0
+        for (i in 1 until plannedPoints.size) {
+            val from = plannedPoints[i - 1]; val to = plannedPoints[i]
+            val result = FloatArray(1)
+            Location.distanceBetween(from.latitude, from.longitude, to.latitude, to.longitude, result)
+            distance += result[0]
+        }
+        return distance
+    }
+
+    private fun updatePlannerStatus() {
+        if (!::planInfo.isInitialized) return
+        val distance = planDistanceMeters()
+        planInfo.text = when {
+            planMode -> "Mode gambar aktif · ketuk peta untuk menambah titik (${plannedPoints.size} titik)"
+            plannedPoints.size < 2 -> "Ketuk Buat rute, lalu pilih minimal 2 titik pada peta."
+            else -> String.format(Locale("id", "ID"), "Rute tersimpan · %d titik · %.2f km", plannedPoints.size, distance / 1000.0)
+        }
+        planButton.text = if (planMode) "Selesai menambah titik" else "＋  Buat rute"
+        if (::mapView.isInitialized) mapView.invalidate()
+    }
+
+    private fun centerOnMyLocation() {
+        if (!hasLocation()) {
+            requestPermissions(arrayOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION), REQUEST_MAP_LOCATION)
+            return
+        }
+        val manager = getSystemService(LOCATION_SERVICE) as LocationManager
+        val last = listOf(LocationManager.GPS_PROVIDER, LocationManager.NETWORK_PROVIDER)
+            .mapNotNull { provider -> try { manager.getLastKnownLocation(provider) } catch (_: SecurityException) { null } }
+            .maxByOrNull { it.time }
+        if (last == null) Toast.makeText(this, "Lokasi belum tersedia. Aktifkan GPS dan coba lagi.", Toast.LENGTH_LONG).show()
+        else { mapView.controller.animateTo(GeoPoint(last.latitude, last.longitude)); mapView.controller.setZoom(16.0) }
+    }
+
+    private fun refreshMapOverlays(force: Boolean = false) {
+        if (!::mapView.isInitialized) return
+        val plannedKey = plannedPoints.joinToString(";") { "${it.latitude},${it.longitude}" }
+        val activeKey = prefs.getString("active_points", "[]") ?: "[]"
+        if (!force && plannedKey == renderedPlannedRoute && activeKey == renderedActiveRoute) return
+        renderedPlannedRoute = plannedKey
+        renderedActiveRoute = activeKey
+        mapView.overlays.removeAll { it is Polyline || it is Marker }
+        if (plannedPoints.size >= 2) {
+            mapView.overlays.add(Polyline(mapView).apply {
+                setPoints(plannedPoints)
+                outlinePaint.strokeWidth = dp(8).toFloat()
+                color = 0xFF29C9B3.toInt()
+            })
+        }
+        if (plannedPoints.isNotEmpty()) {
+            mapView.overlays.add(Marker(mapView).apply { position = plannedPoints.first(); title = "Mulai rute"; setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_BOTTOM) })
+            if (plannedPoints.size > 1) mapView.overlays.add(Marker(mapView).apply { position = plannedPoints.last(); title = "Tujuan rute"; setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_BOTTOM) })
+        }
+        val active = try { JSONArray(activeKey) } catch (_: Exception) { JSONArray() }
+        val recorded = (0 until active.length()).mapNotNull { i -> active.optJSONObject(i)?.let { GeoPoint(it.optDouble("lat"), it.optDouble("lon")) } }
+        if (recorded.size >= 2) mapView.overlays.add(Polyline(mapView).apply {
+            setPoints(recorded); outlinePaint.strokeWidth = dp(5).toFloat(); color = 0xFFFF8B67.toInt()
+        })
+        mapView.invalidate()
     }
 
     private fun column(color: Int, padding: Int): LinearLayout = LinearLayout(this).apply {
@@ -174,6 +331,9 @@ class MainActivity : Activity() {
         if (requestCode == REQUEST_LOCATION) {
             if (checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED) toggleRecording()
             else Toast.makeText(this, "Izin lokasi diperlukan untuk merekam gowes", Toast.LENGTH_LONG).show()
+        } else if (requestCode == REQUEST_MAP_LOCATION) {
+            if (checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED) centerOnMyLocation()
+            else Toast.makeText(this, "Izin lokasi diperlukan untuk menampilkan posisi Anda", Toast.LENGTH_LONG).show()
         } else if (requestCode == REQUEST_NOTIFICATIONS) {
             // Android 13+ allows location foreground services without notification permission; continue tracking.
             startTracking()
@@ -197,7 +357,7 @@ class MainActivity : Activity() {
         metrics?.findViewWithTag<TextView>("DURASI")?.text = String.format(Locale.US, "%02d:%02d:%02d", hours, minutes, seconds)
         metrics?.findViewWithTag<TextView>("RATA-RATA")?.text = String.format(Locale("id", "ID"), "%.1f km/j", speed)
         metrics?.findViewWithTag<TextView>("TANJAKAN")?.text = String.format(Locale("id", "ID"), "%.0f m", ascent)
-        routeView.setPoints(prefs.getString("active_points", "[]") ?: "[]", prefs.getBoolean("recording", false))
+        refreshMapOverlays()
         action.text = if (prefs.getBoolean("recording", false)) "Selesaikan Gowes" else "Mulai Gowes"
     }
 
@@ -269,8 +429,8 @@ class MainActivity : Activity() {
         box.post { (root.parent as? ScrollView)?.smoothScrollTo(0, box.bottom) }
     }
 
-    override fun onResume() { super.onResume(); handler.post(ticker); refreshStats() }
-    override fun onPause() { handler.removeCallbacks(ticker); super.onPause() }
+    override fun onResume() { super.onResume(); if (::mapView.isInitialized) mapView.onResume(); handler.post(ticker); refreshStats() }
+    override fun onPause() { handler.removeCallbacks(ticker); if (::mapView.isInitialized) mapView.onPause(); super.onPause() }
     override fun onDestroy() { try { unregisterReceiver(tickReceiver) } catch (_: Exception) { }; super.onDestroy() }
 
     private class RouteView(context: Context, private val animate: Boolean = false) : View(context) {
@@ -416,6 +576,7 @@ class MainActivity : Activity() {
     companion object {
         private const val REQUEST_LOCATION = 72
         private const val REQUEST_NOTIFICATIONS = 73
+        private const val REQUEST_MAP_LOCATION = 74
         private const val GREEN = 0xFFB7F36B.toInt()
         private const val MUTED = 0xFF9DA8AA.toInt()
     }
